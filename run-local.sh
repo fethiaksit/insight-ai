@@ -11,11 +11,17 @@ while IFS='=' read -r key val; do
 done < "$PROJECT_ROOT/.env"
 
 port_owner() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
+is_project_pid() {
+  local pid="$1" cmd cwd
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  [[ "$cmd" == *"$PROJECT_ROOT"* || "$cwd" == "$PROJECT_ROOT"* || "$cmd" == *"uvicorn app.main:app"* ]]
+}
 ensure_free() {
   local port="$1" service="$2" pid
   pid="$(port_owner "$port")"; [[ -z "$pid" ]] && return 0
   local cmd; cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  if [[ "$cmd" == *"$PROJECT_ROOT"* || "$cmd" == *"uvicorn app.main:app"* ]]; then kill "$pid"; sleep 1
+  if is_project_pid "$pid"; then kill "$pid"; sleep 1
   else echo "HATA: $port portu başka bir uygulama tarafından kullanılıyor: $cmd"; exit 1; fi
 }
 wait_url() {
@@ -36,7 +42,7 @@ fi
 PYTHON_BIN="$(command -v python3.12 || true)"; [[ -n "$PYTHON_BIN" ]] || { echo "HATA: Python 3.12 bulunamadı."; exit 1; }
 VENV="$HOME/.venvs/sosyalmedyatakip-scraper"
 [[ -x "$VENV/bin/python" ]] || "$PYTHON_BIN" -m venv "$VENV"
-"$VENV/bin/pip" install -r "$PROJECT_ROOT/scraper/requirements.txt"
+"$VENV/bin/pip" install --disable-pip-version-check -q -r "$PROJECT_ROOT/scraper/requirements.txt"
 "$VENV/bin/python" -m playwright install chromium
 
 ensure_free 8091 scraper
@@ -44,7 +50,7 @@ ensure_free 8091 scraper
 wait_url http://127.0.0.1:8091/health "$LOG_DIR/scraper.log"
 
 ensure_free 8080 backend
-(cd "$PROJECT_ROOT/backend" && go mod download && exec env BACKEND_PORT=8080 go run ./cmd/api) >"$LOG_DIR/backend.log" 2>&1 & echo $! >"$PID_DIR/backend.pid"
+(cd "$PROJECT_ROOT/backend" && go mod download && exec env BACKEND_PORT=8080 REDIS_URL=redis://127.0.0.1:6379/0 REDIS_HOST=127.0.0.1 REDIS_PORT=6379 go run ./cmd/api) >"$LOG_DIR/backend.log" 2>&1 & echo $! >"$PID_DIR/backend.pid"
 wait_url http://127.0.0.1:8080/health "$LOG_DIR/backend.log"
 
 ensure_free 5173 frontend
