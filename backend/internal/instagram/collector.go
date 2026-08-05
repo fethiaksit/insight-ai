@@ -3,18 +3,16 @@ package instagram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
 type Collector struct {
 	provider InstagramProvider
 	repo     *Repository
-	maxPages int
 }
 
 func NewCollector(provider InstagramProvider, repo *Repository) *Collector {
-	return &Collector{provider: provider, repo: repo, maxPages: 1000}
+	return &Collector{provider: provider, repo: repo}
 }
 
 func (c *Collector) Sync(ctx context.Context, username string) (int, error) {
@@ -25,33 +23,51 @@ func (c *Collector) Sync(ctx context.Context, username string) (int, error) {
 	if username == "" {
 		return 0, errors.New("Instagram kullanıcı adı gerekli")
 	}
-	cursor, seen, total := "", map[string]bool{}, 0
-	for page := 0; page < c.maxPages; page++ {
-		result, e := c.provider.GetPosts(ctx, username, cursor)
-		if e != nil {
-			return total, fmt.Errorf("@%s sayfa %d: %w", username, page+1, e)
-		}
-		if result == nil {
-			return total, errors.New("Instagram provider boş sayfa döndürdü")
-		}
-		for i := range result.Posts {
-			result.Posts[i].Username = username
-		}
-		created, e := c.repo.SavePosts(ctx, result.Posts)
-		if e != nil {
-			return total, e
-		}
-		total += created
-		if result.NextCursor == "" {
-			return total, nil
-		}
-		if seen[result.NextCursor] {
-			return total, errors.New("Instagram provider aynı pagination cursor değerini tekrarladı")
-		}
-		seen[result.NextCursor] = true
-		cursor = result.NextCursor
+	known, e := c.repo.KnownShortcodes(ctx, username, 50)
+	if e != nil {
+		return 0, e
 	}
-	return total, errors.New("Instagram provider pagination güvenlik sınırını aştı")
+	events, errs := c.provider.ScrapeProfile(ctx, username, known)
+	total := 0
+	for events != nil || errs != nil {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			if ev.Profile != nil {
+				a, accountErr := c.repo.Account(ctx, username)
+				if accountErr == nil {
+					a.DisplayName = ev.Profile.FullName
+					a.ProfilePictureURL = ev.Profile.ProfilePicURL
+					a.UpdatedAt = syncTime()
+					if saveErr := c.repo.SaveAccount(ctx, a); saveErr != nil {
+						return total, saveErr
+					}
+				}
+			}
+			if ev.Post != nil {
+				ev.Post.Username = username
+				n, saveErr := c.repo.SavePosts(ctx, []Post{*ev.Post})
+				total += n
+				if saveErr != nil {
+					return total, saveErr
+				}
+			}
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil {
+				return total, err
+			}
+		case <-ctx.Done():
+			return total, ctx.Err()
+		}
+	}
+	return total, nil
 }
 
 func syncTime() time.Time { return time.Now().UTC() }

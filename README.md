@@ -9,23 +9,30 @@ docker compose up -d --build
 curl http://localhost:8080/health
 ```
 
-Compose yalnızca iki servis başlatır: `backend` ve `redis`. Redis kalıcı verisi `redis_data` volume'ünde tutulur. Backend Redis healthcheck tamamlanana kadar başlamaz ve ayrıca Redis bağlantısını yeniden dener.
+Compose `scraper`, `backend` ve `redis` servislerini başlatır. Redis kalıcı verisi `redis_data` volume'ünde tutulur.
 
 ## Yerel geliştirme
 
-Önce Redis'i açın:
+Dört terminalde yerel geliştirme:
 
 ```bash
-docker compose up -d redis
+redis-server
 ```
-
-Backend root dizinden çalışır:
 
 ```bash
-go run ./backend/cmd/api
+cd scraper
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8091
 ```
 
-Yerel backend varsayılan olarak `redis://localhost:6379/0` kullanır. Frontend bağımsız olarak geliştirme modunda çalışır:
+```bash
+cd backend
+go run ./cmd/api
+```
+
+Yerel backend varsayılan olarak `redis://localhost:6379/0` ve scraper için `http://127.0.0.1:8091` kullanır.
 
 ```bash
 cd frontend
@@ -41,25 +48,14 @@ npm run dev
 
 Tüm yapılandırma değerleri [`.env.example`](.env.example) içinde yer alır. `REDIS_URL` tanımlanırsa `REDIS_HOST` ve `REDIS_PORT` yerine önceliklidir.
 
-## Instagram provider
+## Instagram scraper
 
 Instagram Login zorunlu değildir. Uygulama, yalnızca seçtiğiniz herkese açık hesapların sağlayıcı tarafından erişilebilen gönderilerini toplar. Kullanıcı adı/şifre, gizli cookie ve tarayıcı otomasyonu kullanılmaz. Sağlayıcı yoksa sahte veri üretilmez.
 
-```bash
-INSTAGRAM_PROVIDER=generic-http
-INSTAGRAM_PROVIDER_API_KEY=...
-INSTAGRAM_PROVIDER_BASE_URL=https://provider.example/v1
-INSTAGRAM_SYNC_CRON="*/30 * * * *"
-```
+`INSTAGRAM_SCRAPER_URL` varsayılan olarak `http://127.0.0.1:8091`, zaman aşımı `INSTAGRAM_SCRAPER_TIMEOUT=30m` değeridir. Meta access token veya business account kimliği gerekmez.
 
-`external` adapter sözleşmesi şöyledir:
+Gönderi alanları `external_id`, `shortcode`, `caption`, `permalink`, `media_type`, `media_url`, `thumbnail_url` ve RFC3339 `published_at` değeridir. Scraper sonucu `application/x-ndjson` olarak aktarılır ve Go backend her gönderiyi akıştan geldiği anda Redis'e yazar.
 
-- `GET /profiles/{username}` → `username`, `name`, `profile_picture_url`
-- `GET /profiles/{username}/posts?cursor=...` → `posts` ve `next_cursor`
-- `GET /posts/{shortcode}` → tek gönderi
+Yeni hesap eklenince erişilebilen geçmiş gönderiler alınır. Sonraki manuel ve zamanlanmış senkronizasyonlarda bilinen shortcode'lar scraper'a iletilir; art arda üç bilinen gönderide akış durur. Aynı `external_id` veya permalink yeniden kaydedilmez. Hesaplar ve gönderiler Redis'te süresiz tutulur; Docker Redis servisi AOF `everysec` ile çalışır. OpenAI anahtarı Instagram anahtar kelime araması için gerekli değildir.
 
-Gönderi alanları `external_id`, `caption`, `permalink`, `media_type`, `media_url`, `thumbnail_url` ve RFC3339 `published_at` değeridir. API anahtarı hem `Authorization: Bearer` hem de `X-API-Key` başlığıyla gönderilir; farklı bir vendor sözleşmesi için yalnızca yeni bir `InstagramProvider` adapter'ı gerekir.
-
-Yeni hesap eklenince tüm `next_cursor` sayfaları tüketilir. Sonraki manuel ve zamanlanmış senkronizasyonlar aynı `external_id` veya `permalink` değerini yeniden kaydetmez. Hesaplar ve gönderiler Redis'te süresiz tutulur; Docker Redis servisi AOF `everysec` ile çalışır. OpenAI anahtarı Instagram anahtar kelime araması için gerekli değildir.
-
-Arayüz geliştirmesi için `APP_ENV=development` ve `INSTAGRAM_PROVIDER=mock` açıkça seçilebilir. Bu sağlayıcı demo içerik üretir ve arayüzde “Demo veri” etiketi gösterilir. Production ortamında mock provider etkinleştirilmez ve hiçbir zaman varsayılan değildir.
+Canlı kontrol için scraper çalışırken `curl -N -X POST http://127.0.0.1:8091/v1/profiles/scrape -H 'Content-Type: application/json' -d '{"profile":"omereski","known_shortcodes":[],"max_posts":5}'` kullanılabilir. Instagram erişimi engellerse servis boş başarı yerine hata kodu içeren bir NDJSON satırı döndürür.

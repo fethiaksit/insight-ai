@@ -53,20 +53,7 @@ func New() (*Application, error) {
 	repo := repositories.NewRedisRepository(client)
 	ai := services.NewAIService(cfg.OpenAIKey, cfg.OpenAIModel, cfg.EmbeddingModel)
 	svc := services.New(repo, ai)
-	var instagramProvider instagram.InstagramProvider
-	switch cfg.InstagramProvider {
-	case "external", "http", "generic-http":
-		if cfg.InstagramProviderAPIKey != "" && cfg.InstagramProviderBaseURL != "" {
-			instagramProvider = instagram.NewExternalInstagramProvider(cfg.InstagramProviderBaseURL, cfg.InstagramProviderAPIKey, cfg.InstagramProviderTimeout, cfg.InstagramProviderMinInterval)
-		}
-	case "mock":
-		if cfg.AppEnv != "production" {
-			instagramProvider = instagram.NewMockInstagramProvider()
-		}
-	case "":
-	default:
-		return nil, fmt.Errorf("unsupported INSTAGRAM_PROVIDER %q", cfg.InstagramProvider)
-	}
+	var instagramProvider instagram.InstagramProvider = instagram.NewInstaloaderHTTPProvider(cfg.InstagramScraperURL, cfg.InstagramScraperTimeout)
 	instagramService := instagram.NewService(instagramProvider, cfg.InstagramProvider, instagram.NewRepository(client))
 	router := httpapi.NewRouter(svc, instagramService)
 	for _, route := range router.Routes() {

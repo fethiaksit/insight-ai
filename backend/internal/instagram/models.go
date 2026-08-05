@@ -8,8 +8,23 @@ import (
 // InstagramProvider is the only contract the collector knows about. Concrete
 // provider response formats are translated into these provider-neutral types.
 type InstagramProvider interface {
-	GetProfile(ctx context.Context, username string) (*Profile, error)
-	GetPosts(ctx context.Context, username string, cursor string) (*PostPage, error)
+	ScrapeProfile(ctx context.Context, username string, knownShortcodes []string) (<-chan InstagramScrapeEvent, <-chan error)
+}
+
+type InstagramScrapeEvent struct {
+	Type     string          `json:"type"`
+	Profile  *ScrapedProfile `json:"profile,omitempty"`
+	Post     *Post           `json:"post,omitempty"`
+	Complete *ScrapeComplete `json:"complete,omitempty"`
+}
+type ScrapedProfile struct {
+	Username, FullName, ProfilePicURL string
+	IsPrivate                         bool
+	PostsCount                        int64
+}
+type ScrapeComplete struct {
+	Fetched            int  `json:"fetched"`
+	StoppedOnKnownPost bool `json:"stopped_on_known_post"`
 }
 
 type Profile struct {
@@ -19,17 +34,20 @@ type Profile struct {
 }
 
 type Post struct {
-	Platform     string    `json:"platform"`
-	Username     string    `json:"username"`
-	ExternalID   string    `json:"external_id"`
-	Shortcode    string    `json:"shortcode"`
-	Caption      string    `json:"caption"`
-	Permalink    string    `json:"permalink"`
-	MediaType    string    `json:"media_type"`
-	MediaURL     string    `json:"media_url"`
-	ThumbnailURL string    `json:"thumbnail_url"`
-	PublishedAt  time.Time `json:"published_at"`
-	CollectedAt  time.Time `json:"collected_at"`
+	Platform      string    `json:"platform"`
+	Username      string    `json:"username"`
+	ExternalID    string    `json:"external_id"`
+	Shortcode     string    `json:"shortcode"`
+	Caption       string    `json:"caption"`
+	Permalink     string    `json:"permalink"`
+	MediaType     string    `json:"media_type"`
+	MediaURL      string    `json:"media_url"`
+	ThumbnailURL  string    `json:"thumbnail_url"`
+	IsVideo       bool      `json:"is_video"`
+	LikesCount    int64     `json:"likes_count"`
+	CommentsCount int64     `json:"comments_count"`
+	PublishedAt   time.Time `json:"published_at"`
+	CollectedAt   time.Time `json:"collected_at"`
 }
 
 type PostPage struct {
@@ -49,6 +67,7 @@ type Account struct {
 	SyncError         string     `json:"sync_error,omitempty"`
 	SyncStatus        string     `json:"sync_status"`
 	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type Status struct {

@@ -126,7 +126,7 @@ func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
 			c.Error(e)
 			return
 		}
-		if data.SyncStatus == "syncing" {
+		if data.SyncStatus == "pending" {
 			s.StartSync(data.Username)
 		}
 		c.JSON(http.StatusCreated, gin.H{"success": true, "account": gin.H{
@@ -198,7 +198,11 @@ func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
 			c.Error(e)
 			return
 		}
-		data, e := s.List(c.Request.Context(), instagram.ListOptions{Page: page, Limit: limit, Username: c.Query("username"), Search: c.Query("search"), MediaType: c.Query("media_type"), Match: c.DefaultQuery("match", "any"), StartDate: start, EndDate: end, Sort: c.DefaultQuery("sort", "newest")})
+		search := c.Query("keywords")
+		if search == "" {
+			search = c.Query("search")
+		}
+		data, e := s.List(c.Request.Context(), instagram.ListOptions{Page: page, Limit: limit, Username: c.Query("username"), Search: search, MediaType: c.Query("media_type"), Match: c.DefaultQuery("match", "any"), StartDate: start, EndDate: end, Sort: c.DefaultQuery("sort", "newest")})
 		respond(c, data, e)
 	})
 	r.GET("/posts/:id", func(c *gin.Context) { data, e := s.Get(c.Request.Context(), c.Param("id")); respond(c, data, e) })

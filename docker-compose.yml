@@ -25,18 +25,25 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-      INSTAGRAM_PROVIDER: ${INSTAGRAM_PROVIDER:-}
-      INSTAGRAM_PROVIDER_API_KEY: ${INSTAGRAM_PROVIDER_API_KEY:-}
-      INSTAGRAM_PROVIDER_BASE_URL: ${INSTAGRAM_PROVIDER_BASE_URL:-}
-      INSTAGRAM_PROVIDER_TIMEOUT: ${INSTAGRAM_PROVIDER_TIMEOUT:-20s}
-      INSTAGRAM_PROVIDER_MIN_INTERVAL: ${INSTAGRAM_PROVIDER_MIN_INTERVAL:-250ms}
+      INSTAGRAM_SCRAPER_URL: http://scraper:8091
+      INSTAGRAM_SCRAPER_TIMEOUT: ${INSTAGRAM_SCRAPER_TIMEOUT:-30m}
       INSTAGRAM_SYNC_CRON: "${INSTAGRAM_SYNC_CRON:-*/30 * * * *}"
       JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-secret}
     depends_on:
       redis: { condition: service_healthy }
+      scraper: { condition: service_healthy }
     expose: ["8080"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  scraper:
+    build: ./scraper
+    ports: ["8091:8091"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health')"]
       interval: 10s
       timeout: 5s
       retries: 10

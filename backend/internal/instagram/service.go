@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,10 +15,12 @@ type Service struct {
 	providerName string
 	repo         *Repository
 	collector    *Collector
+	syncing      map[string]bool
+	mu           sync.Mutex
 }
 
 func NewService(provider InstagramProvider, providerName string, repo *Repository) *Service {
-	return &Service{provider: provider, providerName: providerName, repo: repo, collector: NewCollector(provider, repo)}
+	return &Service{provider: provider, providerName: providerName, repo: repo, collector: NewCollector(provider, repo), syncing: map[string]bool{}}
 }
 func (s *Service) Configured() bool { return s.provider != nil }
 func (s *Service) Status(ctx context.Context) (Status, error) {
@@ -35,10 +38,8 @@ func (s *Service) AddAccount(ctx context.Context, username string) (Account, err
 	} else if !errors.Is(e, ErrNotFound) {
 		return Account{}, e
 	}
-	a := Account{ID: username, Username: username, DisplayName: "@" + username, ProfileURL: canonicalProfileURL(username), Active: true, CreatedAt: syncTime(), SyncStatus: "syncing"}
-	if !s.Configured() {
-		a.SyncStatus, a.SyncError = "configuration_required", "Instagram veri sağlayıcısı yapılandırılmadı"
-	}
+	now := syncTime()
+	a := Account{ID: username, Username: username, DisplayName: "@" + username, ProfileURL: canonicalProfileURL(username), Active: true, CreatedAt: now, UpdatedAt: now, SyncStatus: "pending"}
 	if e := s.repo.AddAccount(ctx, a); e != nil {
 		return Account{}, e
 	}
@@ -49,7 +50,7 @@ func (s *Service) StartSync(username string) {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if _, e := s.Sync(ctx, username); e != nil {
 			log.Printf("instagram background sync failed username=%s error=%v", username, e)
@@ -85,6 +86,14 @@ func (s *Service) Sync(ctx context.Context, username string) (int, error) {
 	return s.sync(ctx, &a)
 }
 func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
+	s.mu.Lock()
+	if s.syncing[a.Username] {
+		s.mu.Unlock()
+		return 0, fmt.Errorf("@%s için senkronizasyon zaten çalışıyor", a.Username)
+	}
+	s.syncing[a.Username] = true
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); delete(s.syncing, a.Username); s.mu.Unlock() }()
 	if !s.Configured() {
 		a.SyncStatus, a.SyncError = "configuration_required", "Instagram veri sağlayıcısı yapılandırılmadı"
 		return 0, s.repo.SaveAccount(ctx, *a)
@@ -94,24 +103,22 @@ func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
 	if e := s.repo.SaveAccount(ctx, *a); e != nil {
 		return 0, e
 	}
-	profile, e := s.provider.GetProfile(ctx, a.Username)
-	if e == nil && profile != nil {
-		a.DisplayName, a.ProfilePictureURL = profile.Name, profile.ProfilePictureURL
-	}
-	var count int
-	if e == nil {
-		count, e = s.collector.Sync(ctx, a.Username)
+	count, e := s.collector.Sync(ctx, a.Username)
+	// The streaming collector may have enriched the account with profile data.
+	if enriched, loadErr := s.repo.Account(ctx, a.Username); loadErr == nil {
+		a.DisplayName, a.ProfilePictureURL = enriched.DisplayName, enriched.ProfilePictureURL
 	}
 	now := syncTime()
 	a.LastSyncAt = &now
 	if e != nil {
 		a.SyncError = e.Error()
-		a.SyncStatus = "error"
+		a.SyncStatus = "failed"
 	} else {
 		a.SyncError = ""
-		a.SyncStatus = "success"
+		a.SyncStatus = "completed"
 		a.TotalPosts += int64(count)
 	}
+	a.UpdatedAt = now
 	if saveErr := s.repo.SaveAccount(ctx, *a); saveErr != nil && e == nil {
 		e = saveErr
 	}

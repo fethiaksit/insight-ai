@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -12,6 +11,8 @@ type Config struct {
 	AppEnv, RedisURL, OpenAIKey, OpenAIModel, EmbeddingModel, ScanCron, InstagramSyncCron, Port string
 	InstagramProvider, InstagramProviderAPIKey, InstagramProviderBaseURL                        string
 	InstagramProviderTimeout, InstagramProviderMinInterval                                      time.Duration
+	InstagramScraperURL                                                                         string
+	InstagramScraperTimeout                                                                     time.Duration
 	ConnectRetries                                                                              int
 	ConnectRetryDelay                                                                           time.Duration
 }
@@ -33,7 +34,11 @@ func Load() (Config, error) {
 	if e != nil || interval < 0 {
 		return Config{}, fmt.Errorf("INSTAGRAM_PROVIDER_MIN_INTERVAL must be a non-negative duration")
 	}
-	return Config{AppEnv: value("APP_ENV", "development"), RedisURL: redisURL(), OpenAIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: value("OPENAI_MODEL", "gpt-4.1-mini"), EmbeddingModel: value("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), ScanCron: value("SCAN_CRON", "*/15 * * * *"), InstagramSyncCron: value("INSTAGRAM_SYNC_CRON", "*/30 * * * *"), Port: value("BACKEND_PORT", "8080"), InstagramProvider: strings.ToLower(strings.TrimSpace(os.Getenv("INSTAGRAM_PROVIDER"))), InstagramProviderAPIKey: os.Getenv("INSTAGRAM_PROVIDER_API_KEY"), InstagramProviderBaseURL: os.Getenv("INSTAGRAM_PROVIDER_BASE_URL"), InstagramProviderTimeout: timeout, InstagramProviderMinInterval: interval, ConnectRetries: retries, ConnectRetryDelay: delay}, nil
+	scraperTimeout, e := time.ParseDuration(value("INSTAGRAM_SCRAPER_TIMEOUT", "30m"))
+	if e != nil || scraperTimeout <= 0 {
+		return Config{}, fmt.Errorf("INSTAGRAM_SCRAPER_TIMEOUT must be a positive duration")
+	}
+	return Config{AppEnv: value("APP_ENV", "development"), RedisURL: redisURL(), OpenAIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: value("OPENAI_MODEL", "gpt-4.1-mini"), EmbeddingModel: value("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), ScanCron: value("SCAN_CRON", "*/15 * * * *"), InstagramSyncCron: value("INSTAGRAM_SYNC_CRON", "*/30 * * * *"), Port: value("BACKEND_PORT", "8080"), InstagramProvider: "instaloader", InstagramScraperURL: value("INSTAGRAM_SCRAPER_URL", "http://127.0.0.1:8091"), InstagramScraperTimeout: scraperTimeout, InstagramProviderTimeout: timeout, InstagramProviderMinInterval: interval, ConnectRetries: retries, ConnectRetryDelay: delay}, nil
 }
 func redisURL() string {
 	if v := os.Getenv("REDIS_URL"); v != "" {

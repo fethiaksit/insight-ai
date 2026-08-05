@@ -192,13 +192,28 @@ func (r *Repository) SavePosts(ctx context.Context, posts []Post) (int, error) {
 		pipe := r.client.TxPipeline()
 		pipe.Set(ctx, "instagram:post:"+key, raw, 0)
 		pipe.SAdd(ctx, "instagram:posts", key)
-		pipe.SAdd(ctx, "instagram:account:posts:"+p.Username, key)
+		score := float64(p.PublishedAt.Unix())
+		pipe.ZAdd(ctx, "instagram:account:"+p.Username+":posts", &redis.Z{Score: score, Member: key})
 		if _, e = pipe.Exec(ctx); e != nil {
 			return created, e
 		}
 		created++
 	}
 	return created, nil
+}
+func (r *Repository) KnownShortcodes(ctx context.Context, username string, limit int64) ([]string, error) {
+	ids, e := r.client.ZRevRange(ctx, "instagram:account:"+cleanUsername(username)+":posts", 0, limit-1).Result()
+	if e != nil {
+		return nil, e
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		p, x := r.Get(ctx, id)
+		if x == nil && p.Shortcode != "" {
+			out = append(out, p.Shortcode)
+		}
+	}
+	return out, nil
 }
 func (r *Repository) TotalPosts(ctx context.Context) (int64, error) {
 	return r.client.SCard(ctx, "instagram:posts").Result()
