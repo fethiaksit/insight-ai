@@ -9,19 +9,19 @@ app = FastAPI(title="Instagram Instaloader Scraper")
 
 
 @app.get("/health")
-def health():
+async def health():
     provider = get_provider()
-    state = provider.status() if isinstance(provider, BrowserPublicProvider) else {"browser_profile_ready": False, "instagram_authenticated": False}
-    return {"status": "ok", "provider": provider.name, **state}
+    state = await provider.status() if isinstance(provider, BrowserPublicProvider) else {"browser_running": False, "instagram_authenticated": False}
+    return {"status": "ok", "provider": provider.name, "browser_profile_ready": provider.profile_dir.exists() if isinstance(provider, BrowserPublicProvider) else False, **state}
 
 @app.post("/browser/open")
-def browser_open():
-    provider = BrowserPublicProvider(); provider.open()
-    return {"status":"opened", **provider.status()}
+async def browser_open():
+    provider = BrowserPublicProvider(); await provider.open(navigate_home=True)
+    return {"status":"opened", **(await provider.status())}
 
 @app.get("/browser/status")
-def browser_status():
-    return BrowserPublicProvider().status()
+async def browser_status():
+    return await BrowserPublicProvider().status()
 
 
 @app.post("/v1/profiles/scrape")

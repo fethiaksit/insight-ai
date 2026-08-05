@@ -1,6 +1,6 @@
 import json
 import re
-import threading
+import asyncio
 from urllib.parse import unquote, urlparse
 
 from .errors import ScraperError
@@ -8,7 +8,7 @@ from .providers import get_provider
 
 USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 RESERVED = {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}
-SCRAPE_LOCK = threading.Lock()
+SCRAPE_LOCK = asyncio.Lock()
 
 
 def normalize_profile(value: str) -> str:
@@ -30,23 +30,22 @@ def normalize_profile(value: str) -> str:
 def _line(payload): return (json.dumps(payload, ensure_ascii=False) + "\n").encode()
 
 
-def stream_profile(username, known_shortcodes, max_posts):
-    if not SCRAPE_LOCK.acquire(blocking=False):
+async def stream_profile(username, known_shortcodes, max_posts):
+    if SCRAPE_LOCK.locked():
         yield _line({"type":"error","error":{"code":"PROVIDER_UNAVAILABLE","message":"Başka bir Instagram senkronizasyonu çalışıyor","retry_after_seconds":60}}); return
-    try:
+    async with SCRAPE_LOCK:
+      try:
         provider = get_provider()
         yield _line({"type":"profile","profile":{"username":username,"profile_url":f"https://www.instagram.com/{username}/"}})
         fetched = 0
-        for post in provider.scrape(username, set(known_shortcodes), max_posts or 20):
+        async for post in provider.scrape(username, set(known_shortcodes), max_posts or 20):
             yield _line({"type":"post","post":post}); fetched += 1
         if fetched == 0: raise ScraperError("NO_PUBLIC_POSTS", "Erişilebilir herkese açık gönderi bulunamadı", 404)
         yield _line({"type":"complete","provider":provider.name,"fetched":fetched})
-    except ScraperError as exc:
+      except ScraperError as exc:
         retry = 1800 if exc.code == "INSTAGRAM_RATE_LIMITED" else 0
         yield _line({"type":"error","error":{"code":exc.code,"message":exc.message,"retry_after_seconds":retry}})
-    except Exception as exc:
+      except Exception as exc:
         msg = str(exc)
         code = "INSTAGRAM_RATE_LIMITED" if "please wait" in msg.lower() or "429" in msg else "SCRAPE_FAILED"
         yield _line({"type":"error","error":{"code":code,"message":"Instagram geçici olarak çok fazla istek algıladı. 30 dakika sonra tekrar deneyin." if code == "INSTAGRAM_RATE_LIMITED" else f"Instagram gönderileri alınamadı: {msg}","retry_after_seconds":1800 if code == "INSTAGRAM_RATE_LIMITED" else 0}})
-    finally:
-        SCRAPE_LOCK.release()

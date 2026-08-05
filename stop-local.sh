@@ -17,3 +17,12 @@ for service in frontend backend scraper; do
   fi
   rm -f "$file"
 done
+
+# go run ve npm kendi child süreçlerini oluşturabilir; PID dosyasındaki parent
+# kapanmış olsa bile yalnızca bu proje dizininden çalışan port sahiplerini temizle.
+for port in 8091 8080 5173; do
+  pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  [[ -n "$pid" ]] || continue
+  process_cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  if [[ "$process_cwd" == "$PROJECT_ROOT"* ]]; then kill "$pid" 2>/dev/null || true; fi
+done

@@ -44,6 +44,7 @@ VENV="$HOME/.venvs/sosyalmedyatakip-scraper"
 [[ -x "$VENV/bin/python" ]] || "$PYTHON_BIN" -m venv "$VENV"
 "$VENV/bin/pip" install --disable-pip-version-check -q -r "$PROJECT_ROOT/scraper/requirements.txt"
 "$VENV/bin/python" -m playwright install chromium
+"$VENV/bin/python" -c "from playwright.async_api import async_playwright; print('playwright-ok')"
 
 ensure_free 8091 scraper
 (cd "$PROJECT_ROOT/scraper" && exec "$VENV/bin/python" -m uvicorn app.main:app --host 127.0.0.1 --port 8091) >"$LOG_DIR/scraper.log" 2>&1 & echo $! >"$PID_DIR/scraper.pid"
