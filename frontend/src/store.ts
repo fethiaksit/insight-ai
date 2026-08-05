@@ -1,0 +1,1 @@
+import {create} from 'zustand';type State={dark:boolean;toggle:()=>void};export const useUI=create<State>((set)=>({dark:localStorage.theme==='dark',toggle:()=>set(s=>{const dark=!s.dark;localStorage.theme=dark?'dark':'light';return {dark}})}));

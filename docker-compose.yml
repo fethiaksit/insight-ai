@@ -1,0 +1,45 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      APP_ENV: ${APP_ENV:-production}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
+      REDIS_CONNECT_RETRIES: ${REDIS_CONNECT_RETRIES:-30}
+      REDIS_CONNECT_RETRY_DELAY: ${REDIS_CONNECT_RETRY_DELAY:-2s}
+      SCAN_CRON: "${SCAN_CRON:-*/15 * * * *}"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      INSTAGRAM_PROVIDER: ${INSTAGRAM_PROVIDER:-}
+      INSTAGRAM_PROVIDER_API_KEY: ${INSTAGRAM_PROVIDER_API_KEY:-}
+      INSTAGRAM_PROVIDER_BASE_URL: ${INSTAGRAM_PROVIDER_BASE_URL:-}
+      INSTAGRAM_PROVIDER_TIMEOUT: ${INSTAGRAM_PROVIDER_TIMEOUT:-20s}
+      INSTAGRAM_PROVIDER_MIN_INTERVAL: ${INSTAGRAM_PROVIDER_MIN_INTERVAL:-250ms}
+      INSTAGRAM_SYNC_CRON: "${INSTAGRAM_SYNC_CRON:-*/30 * * * *}"
+      JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-secret}
+    depends_on:
+      redis: { condition: service_healthy }
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  redis_data:

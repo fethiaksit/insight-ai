@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: Social Analytics API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /health:
+    get:
+      summary: Dependency health check
+      responses: { '200': { description: Redis is reachable }, '503': { description: Redis is unavailable } }
+  /accounts:
+    get: { summary: List tracked accounts, responses: { '200': { description: Account page } } }
+    post: { summary: Add a tracked account, responses: { '201': { description: Created } } }
+  /posts:
+    get: { summary: Search and filter analyzed posts, responses: { '200': { description: Post page } } }
+  /topics:
+    get: { summary: List interest topics, responses: { '200': { description: Topic list } } }
+    post: { summary: Add an interest topic, responses: { '201': { description: Created } } }
