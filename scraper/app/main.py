@@ -3,13 +3,25 @@ from fastapi.responses import StreamingResponse
 
 from .models import ScrapeRequest
 from .scraper import normalize_profile, stream_profile
+from .providers import BrowserPublicProvider, get_provider
 
 app = FastAPI(title="Instagram Instaloader Scraper")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "provider": "instaloader"}
+    provider = get_provider()
+    state = provider.status() if isinstance(provider, BrowserPublicProvider) else {"browser_profile_ready": False, "instagram_authenticated": False}
+    return {"status": "ok", "provider": provider.name, **state}
+
+@app.post("/browser/open")
+def browser_open():
+    provider = BrowserPublicProvider(); provider.open()
+    return {"status":"opened", **provider.status()}
+
+@app.get("/browser/status")
+def browser_status():
+    return BrowserPublicProvider().status()
 
 
 @app.post("/v1/profiles/scrape")

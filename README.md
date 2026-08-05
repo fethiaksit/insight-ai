@@ -13,7 +13,15 @@ Compose `scraper`, `backend` ve `redis` servislerini başlatır. Redis kalıcı 
 
 ## Yerel geliştirme
 
-Dört terminalde yerel geliştirme:
+Tüm sistemi tek komutla başlatın:
+
+```bash
+cd /Volumes/KIOXIA/sosyalmedyatakip && bash run-local.sh
+```
+
+Betik Python ortamını `~/.venvs/sosyalmedyatakip-scraper` altında oluşturur, Playwright Chromium'u ve bağımlılıkları kurar, mevcut Homebrew Redis'i kullanır ve servis loglarını `.runtime/logs/` altında tutar. Durdurmak için `Ctrl+C` veya `bash stop-local.sh` kullanın.
+
+Elle çalıştırmak isterseniz dört terminal kullanabilirsiniz:
 
 ```bash
 redis-server

@@ -44,6 +44,7 @@ type Post struct {
 	MediaURL      string    `json:"media_url"`
 	ThumbnailURL  string    `json:"thumbnail_url"`
 	IsVideo       bool      `json:"is_video"`
+	IsPinned      bool      `json:"is_pinned"`
 	LikesCount    int64     `json:"likes_count"`
 	CommentsCount int64     `json:"comments_count"`
 	PublishedAt   time.Time `json:"published_at"`
@@ -56,18 +57,29 @@ type PostPage struct {
 }
 
 type Account struct {
-	ID                string     `json:"id"`
-	Username          string     `json:"username"`
-	DisplayName       string     `json:"display_name,omitempty"`
-	ProfileURL        string     `json:"profile_url"`
-	ProfilePictureURL string     `json:"profile_picture_url,omitempty"`
-	Active            bool       `json:"active"`
-	LastSyncAt        *time.Time `json:"last_sync_at,omitempty"`
-	TotalPosts        int64      `json:"total_posts"`
-	SyncError         string     `json:"sync_error,omitempty"`
-	SyncStatus        string     `json:"sync_status"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                string      `json:"id"`
+	Username          string      `json:"username"`
+	DisplayName       string      `json:"display_name,omitempty"`
+	ProfileURL        string      `json:"profile_url"`
+	ProfilePictureURL string      `json:"profile_picture_url,omitempty"`
+	Active            bool        `json:"active"`
+	LastSyncAt        *time.Time  `json:"last_sync_at,omitempty"`
+	TotalPosts        int64       `json:"total_posts"`
+	SyncError         string      `json:"sync_error,omitempty"`
+	SyncStatus        string      `json:"sync_status"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	CooldownUntil     *time.Time  `json:"cooldown_until,omitempty"`
+	LastSyncResult    *SyncResult `json:"last_sync_result,omitempty"`
+}
+type SyncResult struct {
+	NewPosts     int       `json:"new_posts"`
+	UpdatedPosts int       `json:"updated_posts"`
+	SkippedPosts int       `json:"skipped_posts"`
+	Provider     string    `json:"provider"`
+	StartedAt    time.Time `json:"started_at"`
+	CompletedAt  time.Time `json:"completed_at"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type Status struct {

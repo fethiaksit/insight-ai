@@ -3,7 +3,7 @@ import pytest
 from app.scraper import normalize_profile
 
 
-@pytest.mark.parametrize("value", ["omereski", "@omereski", " https://www.instagram.com/omereski/?hl=tr "])
+@pytest.mark.parametrize("value", ["omereski", "@omereski", "instagram.com/omereski", " https://www.instagram.com/omereski/?hl=tr "])
 def test_normalizes_supported_inputs(value):
     assert normalize_profile(value) == "omereski"
 

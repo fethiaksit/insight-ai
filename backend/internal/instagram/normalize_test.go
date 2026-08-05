@@ -7,6 +7,7 @@ func TestNormalizeProfile(t *testing.T) {
 		{"omereski", "omereski"},
 		{" @OmerEski ", "omereski"},
 		{"https://instagram.com/omereski", "omereski"},
+		{"instagram.com/omereski", "omereski"},
 		{"https://www.instagram.com/omereski/", "omereski"},
 		{"https://www.instagram.com/omereski/?hl=tr", "omereski"},
 	}
@@ -14,6 +15,15 @@ func TestNormalizeProfile(t *testing.T) {
 		got, err := NormalizeProfile(tt.input)
 		if err != nil || got != tt.want {
 			t.Errorf("NormalizeProfile(%q) = %q, %v; want %q", tt.input, got, err, tt.want)
+		}
+	}
+}
+
+func TestTurkishKeywordMatching(t *testing.T) {
+	p := Post{Caption: "İstanbul Işık ılık bir gün"}
+	for _, search := range []string{"istanbul", "ışık", "ILIK"} {
+		if !matches(p, ListOptions{Search: search, Match: "any"}) {
+			t.Errorf("%q Türkçe eşleşmedi", search)
 		}
 	}
 }

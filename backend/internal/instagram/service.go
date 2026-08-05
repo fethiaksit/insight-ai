@@ -86,6 +86,13 @@ func (s *Service) Sync(ctx context.Context, username string) (int, error) {
 	return s.sync(ctx, &a)
 }
 func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
+	started := syncTime()
+	if a.CooldownUntil != nil && started.Before(*a.CooldownUntil) {
+		return 0, fmt.Errorf("Instagram geçici olarak çok fazla istek algıladı. %d saniye sonra tekrar deneyin", int(time.Until(*a.CooldownUntil).Seconds()))
+	}
+	if a.LastSyncAt != nil && started.Sub(*a.LastSyncAt) < 15*time.Minute {
+		return 0, fmt.Errorf("Bu hesap kısa süre önce senkronize edildi. 15 dakika sonra tekrar deneyin")
+	}
 	s.mu.Lock()
 	if s.syncing[a.Username] {
 		s.mu.Unlock()
@@ -113,12 +120,18 @@ func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
 	if e != nil {
 		a.SyncError = e.Error()
 		a.SyncStatus = "failed"
+		if strings.Contains(e.Error(), "INSTAGRAM_RATE_LIMITED") {
+			until := now.Add(30 * time.Minute)
+			a.CooldownUntil = &until
+			_ = s.repo.SetCooldown(ctx, a.Username, until)
+		}
 	} else {
 		a.SyncError = ""
 		a.SyncStatus = "completed"
 		a.TotalPosts += int64(count)
 	}
 	a.UpdatedAt = now
+	a.LastSyncResult = &SyncResult{NewPosts: count, Provider: s.providerName, StartedAt: started, CompletedAt: now, Error: a.SyncError}
 	if saveErr := s.repo.SaveAccount(ctx, *a); saveErr != nil && e == nil {
 		e = saveErr
 	}
@@ -151,6 +164,13 @@ func (s *Service) List(ctx context.Context, o ListOptions) (ListResult, error) {
 	return s.repo.List(ctx, o)
 }
 func (s *Service) Get(ctx context.Context, id string) (Post, error) { return s.repo.Get(ctx, id) }
+func (s *Service) Browser(ctx context.Context, method, path string) (map[string]any, error) {
+	p, ok := s.provider.(*InstaloaderHTTPProvider)
+	if !ok {
+		return nil, ErrNotConfigured
+	}
+	return p.Browser(ctx, method, path)
+}
 func SyncTimeout(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, 10*time.Minute)
 }

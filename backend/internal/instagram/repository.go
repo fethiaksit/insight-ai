@@ -175,6 +175,17 @@ func (r *Repository) SavePosts(ctx context.Context, posts []Post) (int, error) {
 		if !ok {
 			continue
 		}
+		if p.Shortcode != "" {
+			shortOK, shortErr := r.client.SetNX(ctx, "instagram:shortcode:"+p.Shortcode, key, 0).Result()
+			if shortErr != nil {
+				_ = r.client.Del(ctx, unique).Err()
+				return created, shortErr
+			}
+			if !shortOK {
+				_ = r.client.Del(ctx, unique).Err()
+				continue
+			}
+		}
 		if p.ExternalID != "" && p.Permalink != "" {
 			urlOK, e := r.client.SetNX(ctx, "instagram:unique:url:"+p.Permalink, key, 0).Result()
 			if e != nil {
@@ -214,6 +225,9 @@ func (r *Repository) KnownShortcodes(ctx context.Context, username string, limit
 		}
 	}
 	return out, nil
+}
+func (r *Repository) SetCooldown(ctx context.Context, username string, until time.Time) error {
+	return r.client.Set(ctx, "instagram:cooldown:"+cleanUsername(username), until.Format(time.RFC3339), time.Until(until)).Err()
 }
 func (r *Repository) TotalPosts(ctx context.Context) (int64, error) {
 	return r.client.SCard(ctx, "instagram:posts").Result()
@@ -305,6 +319,7 @@ func keywords(s string) []string {
 	return out
 }
 func turkishFold(s string) string {
+	s = cases.Lower(language.Turkish).String(s)
 	s = norm.NFD.String(s)
 	s = strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Mn, r) {
@@ -312,5 +327,5 @@ func turkishFold(s string) string {
 		}
 		return r
 	}, s)
-	return cases.Lower(language.Turkish).String(s)
+	return s
 }

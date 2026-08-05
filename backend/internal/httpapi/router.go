@@ -106,6 +106,14 @@ func NewRouter(s *services.Service, instagramService *instagram.Service) *gin.En
 	return r
 }
 func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
+	r.POST("/browser/open", func(c *gin.Context) {
+		data, e := s.Browser(c.Request.Context(), http.MethodPost, "/browser/open")
+		respond(c, data, e)
+	})
+	r.GET("/browser/status", func(c *gin.Context) {
+		data, e := s.Browser(c.Request.Context(), http.MethodGet, "/browser/status")
+		respond(c, data, e)
+	})
 	r.GET("/status", func(c *gin.Context) { data, e := s.Status(c.Request.Context()); respond(c, data, e) })
 	r.GET("/accounts", func(c *gin.Context) { data, e := s.Accounts(c.Request.Context()); respond(c, data, e) })
 	r.POST("/accounts", func(c *gin.Context) {

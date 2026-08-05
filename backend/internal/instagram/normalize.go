@@ -16,6 +16,10 @@ func NormalizeProfile(input string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("%w: Instagram kullanıcı adı veya profil URL'si gerekli", ErrInvalidInput)
 	}
+	lowerValue := strings.ToLower(value)
+	if strings.HasPrefix(lowerValue, "instagram.com/") || strings.HasPrefix(lowerValue, "www.instagram.com/") {
+		value = "https://" + value
+	}
 	if strings.Contains(value, "://") {
 		u, err := url.Parse(value)
 		if err != nil {
