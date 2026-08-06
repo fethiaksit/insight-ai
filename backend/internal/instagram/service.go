@@ -90,7 +90,10 @@ func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
 	if a.CooldownUntil != nil && started.Before(*a.CooldownUntil) {
 		return 0, fmt.Errorf("Instagram geçici olarak çok fazla istek algıladı. %d saniye sonra tekrar deneyin", int(time.Until(*a.CooldownUntil).Seconds()))
 	}
-	if a.LastSyncAt != nil && started.Sub(*a.LastSyncAt) < 15*time.Minute {
+	// Başarısız senkronizasyonlar kullanıcı düzelttikten (ör. tarayıcıya giriş
+	// yaptıktan) hemen sonra yeniden denenebilmelidir. Minimum aralık yalnızca
+	// son başarılı senkronizasyon için uygulanır.
+	if a.SyncStatus == "completed" && a.LastSyncAt != nil && started.Sub(*a.LastSyncAt) < 15*time.Minute {
 		return 0, fmt.Errorf("Bu hesap kısa süre önce senkronize edildi. 15 dakika sonra tekrar deneyin")
 	}
 	s.mu.Lock()
@@ -107,6 +110,9 @@ func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
 	}
 	a.SyncStatus = "syncing"
 	a.SyncError = ""
+	if total, countErr := s.repo.AccountPostCount(ctx, a.Username); countErr == nil {
+		a.TotalPosts = total
+	}
 	if e := s.repo.SaveAccount(ctx, *a); e != nil {
 		return 0, e
 	}
@@ -128,7 +134,11 @@ func (s *Service) sync(ctx context.Context, a *Account) (int, error) {
 	} else {
 		a.SyncError = ""
 		a.SyncStatus = "completed"
-		a.TotalPosts += int64(count)
+		if total, countErr := s.repo.AccountPostCount(ctx, a.Username); countErr == nil {
+			a.TotalPosts = total
+		} else {
+			a.TotalPosts += int64(count)
+		}
 	}
 	a.UpdatedAt = now
 	a.LastSyncResult = &SyncResult{NewPosts: count, Provider: s.providerName, StartedAt: started, CompletedAt: now, Error: a.SyncError}

@@ -226,6 +226,9 @@ func (r *Repository) KnownShortcodes(ctx context.Context, username string, limit
 	}
 	return out, nil
 }
+func (r *Repository) AccountPostCount(ctx context.Context, username string) (int64, error) {
+	return r.client.ZCard(ctx, "instagram:account:"+cleanUsername(username)+":posts").Result()
+}
 func (r *Repository) SetCooldown(ctx context.Context, username string, until time.Time) error {
 	return r.client.Set(ctx, "instagram:cooldown:"+cleanUsername(username), until.Format(time.RFC3339), time.Until(until)).Err()
 }

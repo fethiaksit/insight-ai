@@ -170,8 +170,15 @@ class BrowserPublicProvider:
             if shortcode in known: break
             detail = await context.new_page()
             try:
-                await detail.goto(link, wait_until="domcontentloaded", timeout=60_000)
-                await detail.wait_for_timeout(1000)
+                detail.set_default_timeout(5000)
+                try:
+                    await detail.goto(link, wait_until="domcontentloaded", timeout=60_000)
+                except PlaywrightTimeoutError:
+                    if not await detail.locator("body").count():
+                        log.warning("[instagram-browser] post timed out shortcode=%s", shortcode)
+                        continue
+                    log.info("[instagram-browser] post goto timed out but DOM is available shortcode=%s", shortcode)
+                await detail.wait_for_timeout(750)
                 caption = ""
                 for selector in ('meta[property="og:description"]', "article", "main"):
                     try:
@@ -179,16 +186,24 @@ class BrowserPublicProvider:
                         caption = (await loc.get_attribute("content") if selector.startswith("meta") else await loc.inner_text(timeout=3000)) or ""
                         if caption: break
                     except Exception: pass
-                image = await detail.locator('meta[property="og:image"]').get_attribute("content") or ""
-                video = await detail.locator('meta[property="og:video"]').get_attribute("content") or ""
-                published = await detail.locator("time").first.get_attribute("datetime") if await detail.locator("time").count() else ""
+                async def safe_attr(selector, name):
+                    try:
+                        locator = detail.locator(selector).first
+                        return (await locator.get_attribute(name, timeout=2000) or "") if await locator.count() else ""
+                    except Exception:
+                        return ""
+                image = await safe_attr('meta[property="og:image"]', "content")
+                video = await safe_attr('meta[property="og:video"]', "content")
+                published = await safe_attr("time", "datetime")
                 yield {"external_id":shortcode,"shortcode":shortcode,"username":username,"caption":caption,
                        "published_at":published or datetime.now(timezone.utc).isoformat(),"permalink":link,
                        "media_type":"VIDEO" if video or "/reel/" in link else "IMAGE","thumbnail_url":image,"media_url":video or image,
                        "likes_count":0,"comments_count":0,"is_pinned":False}
-            except PlaywrightTimeoutError:
-                log.warning("[instagram-browser] post timed out shortcode=%s", shortcode)
-            finally: await detail.close()
+            except Exception as exc:
+                log.warning("[instagram-browser] post skipped shortcode=%s error=%s", shortcode, type(exc).__name__)
+            finally:
+                try: await detail.close()
+                except Exception: pass
 
 
 class InstagrapiPublicProvider:

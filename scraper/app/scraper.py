@@ -40,7 +40,9 @@ async def stream_profile(username, known_shortcodes, max_posts):
         fetched = 0
         async for post in provider.scrape(username, set(known_shortcodes), max_posts or 20):
             yield _line({"type":"post","post":post}); fetched += 1
-        if fetched == 0: raise ScraperError("NO_PUBLIC_POSTS", "Erişilebilir herkese açık gönderi bulunamadı", 404)
+        # Bilinen shortcode verildiyse sıfır sonuç, profil boş demek değil;
+        # yalnızca yeni gönderi olmadığı anlamına gelir ve başarılı tamamlanır.
+        if fetched == 0 and not known_shortcodes: raise ScraperError("NO_PUBLIC_POSTS", "Erişilebilir herkese açık gönderi bulunamadı", 404)
         yield _line({"type":"complete","provider":provider.name,"fetched":fetched})
       except ScraperError as exc:
         retry = 1800 if exc.code == "INSTAGRAM_RATE_LIMITED" else 0

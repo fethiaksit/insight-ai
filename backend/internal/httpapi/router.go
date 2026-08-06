@@ -167,14 +167,10 @@ func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
 		c.Status(http.StatusNoContent)
 	})
 	r.POST("/accounts/:id/sync", func(c *gin.Context) {
-		ctx, cancel := instagram.SyncTimeout(c.Request.Context())
-		defer cancel()
-		count, e := s.Sync(ctx, c.Param("id"))
-		if e != nil {
-			c.Error(e)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"synced": count})
+		// Browser scraping uzun sürebilir. İşi request context'ine bağlamak,
+		// istemci timeout olduğunda hesabı kalıcı olarak "syncing" bırakıyordu.
+		s.StartSync(c.Param("id"))
+		c.JSON(http.StatusAccepted, gin.H{"status": "syncing"})
 	})
 	// Backwards-compatible manual sync endpoint used by earlier clients.
 	r.POST("/sync", func(c *gin.Context) {
