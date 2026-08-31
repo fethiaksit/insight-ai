@@ -70,13 +70,13 @@ type Service struct {
 	httpClient   *http.Client
 }
 
-func NewService(client *redis.Client, extractorBaseURL, storageDir string, timeout time.Duration) *Service {
+func NewService(client *redis.Client, extractorBaseURL, storageDir string, _ time.Duration) *Service {
 	return &Service{
 		redis:        client,
 		extractorURL: strings.TrimRight(extractorBaseURL, "/") + "/v1/pdf/extract",
 		storageDir:   storageDir,
 		maxFileSize:  DefaultMaxFileSize,
-		httpClient:   &http.Client{Timeout: timeout},
+		httpClient:   &http.Client{Timeout: 0},
 	}
 }
 

@@ -7,9 +7,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+func TestPDFExtractorClientHasNoTimeout(t *testing.T) {
+	service := NewService(nil, "http://127.0.0.1:8091", "data/documents", time.Minute)
+	if service.httpClient.Timeout != 0 {
+		t.Fatalf("PDF extractor client timeout = %s, want 0", service.httpClient.Timeout)
+	}
+}
 
 func TestNormalizeTurkishCharacters(t *testing.T) {
 	got := Normalize("İZMİR Belediyesi IĞDIR şğüöç")
