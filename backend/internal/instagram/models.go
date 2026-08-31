@@ -8,7 +8,7 @@ import (
 // InstagramProvider is the only contract the collector knows about. Concrete
 // provider response formats are translated into these provider-neutral types.
 type InstagramProvider interface {
-	ScrapeProfile(ctx context.Context, username string, knownShortcodes []string) (<-chan InstagramScrapeEvent, <-chan error)
+	ScrapeProfile(ctx context.Context, username string, knownShortcodes []string, fullHistory bool) (<-chan InstagramScrapeEvent, <-chan error)
 }
 
 type InstagramScrapeEvent struct {
@@ -16,6 +16,11 @@ type InstagramScrapeEvent struct {
 	Profile  *ScrapedProfile `json:"profile,omitempty"`
 	Post     *Post           `json:"post,omitempty"`
 	Complete *ScrapeComplete `json:"complete,omitempty"`
+	Progress *ScrapeProgress `json:"progress,omitempty"`
+}
+type ScrapeProgress struct {
+	Discovered, Processed, Saved, Updated, Skipped, Failed, ScrollRound int
+	Status                                                              string
 }
 type ScrapedProfile struct {
 	Username, FullName, ProfilePicURL string
@@ -80,6 +85,30 @@ type SyncResult struct {
 	StartedAt    time.Time `json:"started_at"`
 	CompletedAt  time.Time `json:"completed_at"`
 	Error        string    `json:"error,omitempty"`
+}
+type FullSyncState struct {
+	JobID             string     `json:"job_id"`
+	Username          string     `json:"username"`
+	Status            string     `json:"status"`
+	StartedAt         time.Time  `json:"started_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
+	DiscoveredCount   int        `json:"discovered_count"`
+	ProcessedCount    int        `json:"processed_count"`
+	SavedCount        int        `json:"saved_count"`
+	UpdatedCount      int        `json:"updated_count"`
+	SkippedCount      int        `json:"skipped_count"`
+	FailedCount       int        `json:"failed_count"`
+	ScrollRound       int        `json:"scroll_round"`
+	NoNewRounds       int        `json:"no_new_rounds"`
+	LastShortcode     string     `json:"last_shortcode,omitempty"`
+	OldestShortcode   string     `json:"oldest_shortcode,omitempty"`
+	OldestPublishedAt string     `json:"oldest_published_at,omitempty"`
+	LastScrollHeight  int64      `json:"last_scroll_height"`
+	PauseReason       string     `json:"pause_reason,omitempty"`
+	RetryAfter        int        `json:"retry_after"`
+	CancelRequested   bool       `json:"cancel_requested"`
+	Error             string     `json:"error,omitempty"`
 }
 
 type Status struct {

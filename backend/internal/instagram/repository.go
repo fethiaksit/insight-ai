@@ -232,6 +232,25 @@ func (r *Repository) AccountPostCount(ctx context.Context, username string) (int
 func (r *Repository) SetCooldown(ctx context.Context, username string, until time.Time) error {
 	return r.client.Set(ctx, "instagram:cooldown:"+cleanUsername(username), until.Format(time.RFC3339), time.Until(until)).Err()
 }
+func (r *Repository) SaveFullSyncState(ctx context.Context, state FullSyncState) error {
+	raw, e := json.Marshal(state)
+	if e != nil {
+		return e
+	}
+	return r.client.Set(ctx, "instagram:scrape:"+cleanUsername(state.Username)+":state", raw, 0).Err()
+}
+func (r *Repository) FullSyncState(ctx context.Context, username string) (FullSyncState, error) {
+	var state FullSyncState
+	raw, e := r.client.Get(ctx, "instagram:scrape:"+cleanUsername(username)+":state").Bytes()
+	if errors.Is(e, redis.Nil) {
+		return state, ErrNotFound
+	}
+	if e != nil {
+		return state, e
+	}
+	e = json.Unmarshal(raw, &state)
+	return state, e
+}
 func (r *Repository) TotalPosts(ctx context.Context) (int64, error) {
 	return r.client.SCard(ctx, "instagram:posts").Result()
 }

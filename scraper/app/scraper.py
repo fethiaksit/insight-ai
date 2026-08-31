@@ -30,7 +30,7 @@ def normalize_profile(value: str) -> str:
 def _line(payload): return (json.dumps(payload, ensure_ascii=False) + "\n").encode()
 
 
-async def stream_profile(username, known_shortcodes, max_posts):
+async def stream_profile(username, known_shortcodes, max_posts=0, full_history=True, batch_size=50):
     if SCRAPE_LOCK.locked():
         yield _line({"type":"error","error":{"code":"PROVIDER_UNAVAILABLE","message":"Başka bir Instagram senkronizasyonu çalışıyor","retry_after_seconds":60}}); return
     async with SCRAPE_LOCK:
@@ -38,12 +38,15 @@ async def stream_profile(username, known_shortcodes, max_posts):
         provider = get_provider()
         yield _line({"type":"profile","profile":{"username":username,"profile_url":f"https://www.instagram.com/{username}/"}})
         fetched = 0
-        async for post in provider.scrape(username, set(known_shortcodes), max_posts or 20):
+        limit = min(int(max_posts or 2500), 2500)
+        async for post in provider.scrape(username, set(known_shortcodes), limit):
             yield _line({"type":"post","post":post}); fetched += 1
+            if fetched % 25 == 0:
+                yield _line({"type":"progress","discovered":getattr(provider,"discovered_count",fetched),"processed":fetched,"saved":fetched,"updated":0,"skipped":0,"failed":0,"scroll_round":getattr(provider,"scroll_round",0),"status":"running"})
         # Bilinen shortcode verildiyse sıfır sonuç, profil boş demek değil;
         # yalnızca yeni gönderi olmadığı anlamına gelir ve başarılı tamamlanır.
         if fetched == 0 and not known_shortcodes: raise ScraperError("NO_PUBLIC_POSTS", "Erişilebilir herkese açık gönderi bulunamadı", 404)
-        yield _line({"type":"complete","provider":provider.name,"fetched":fetched})
+        yield _line({"type":"complete","provider":provider.name,"discovered":getattr(provider,"discovered_count",fetched),"processed":fetched,"saved":fetched,"updated":0,"skipped":0,"failed":0,"fetched":fetched,"stop_reason":"profile_end_reached"})
       except ScraperError as exc:
         retry = 1800 if exc.code == "INSTAGRAM_RATE_LIMITED" else 0
         yield _line({"type":"error","error":{"code":exc.code,"message":exc.message,"retry_after_seconds":retry}})

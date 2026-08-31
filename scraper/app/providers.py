@@ -120,6 +120,33 @@ class BrowserPublicProvider:
         pages = context.pages
         usable = next((p for p in pages if not p.is_closed()), None)
         page = usable or await context.new_page()
+        network_posts = {}
+
+        def collect_nodes(value):
+            if isinstance(value, dict):
+                code = value.get("shortcode") or value.get("code")
+                if code and isinstance(code, str) and 3 < len(code) < 32:
+                    caption_value = value.get("caption_text") or value.get("caption") or ""
+                    if isinstance(caption_value, dict): caption_value = caption_value.get("text", "")
+                    timestamp = value.get("taken_at_timestamp") or value.get("taken_at")
+                    published = datetime.fromtimestamp(timestamp, timezone.utc).isoformat() if isinstance(timestamp, (int, float)) else ""
+                    network_posts[code] = {"external_id":str(value.get("id") or value.get("pk") or code), "shortcode":code,
+                        "username":username, "caption":caption_value if isinstance(caption_value,str) else "", "published_at":published,
+                        "permalink":f"https://www.instagram.com/p/{code}/", "media_type":str(value.get("product_type") or value.get("media_type") or "IMAGE").upper(),
+                        "thumbnail_url":value.get("display_url") or value.get("thumbnail_url") or "", "media_url":value.get("video_url") or value.get("display_url") or value.get("thumbnail_url") or "",
+                        "likes_count":value.get("like_count") or 0, "comments_count":value.get("comment_count") or 0, "is_pinned":bool(value.get("is_pinned"))}
+                for child in value.values(): collect_nodes(child)
+            elif isinstance(value, list):
+                for child in value: collect_nodes(child)
+
+        async def capture_response(response):
+            url = response.url.lower()
+            if not any(token in url for token in ("graphql", "feed/user", "web_profile_info", "polarisprofile")): return
+            try: collect_nodes(await response.json())
+            except Exception: pass
+
+        def on_response(response): asyncio.create_task(capture_response(response))
+        page.on("response", on_response)
         for extra in list(context.pages):
             if extra != page and username in extra.url:
                 await extra.close()
@@ -153,21 +180,255 @@ class BrowserPublicProvider:
         if state == "profile_private": raise ScraperError("PROFILE_PRIVATE", "Bu profil gizli olduğu için gönderiler alınamıyor", 403)
         if state == "timeout" and goto_error:
             await self._debug(page, response, goto_error); raise ScraperError("SCRAPE_TIMEOUT", "Instagram sayfasına belirtilen sürede ulaşılamadı. İnternet bağlantısını ve Instagram tarayıcı oturumunu kontrol edin.", 504)
-        links, seen, stagnant = [], set(), 0
-        for _ in range(10):
-            hrefs = await page.locator(POST_SELECTOR).evaluate_all("els => els.map(e => e.href)")
+        links, seen, stagnant, scroll_round = [], set(), 0, 0
+        self.discovered_count, self.scroll_round = 0, 0
+
+        # Bu bir gönderi sayısı sınırı değildir. Instagram gerçekten yeni içerik
+        # üretmediğinde işlemin sonsuza kadar kilitlenmesini engeller.
+        no_new_limit = max(
+            20,
+            int(os.getenv("INSTAGRAM_NO_NEW_POST_ROUNDS", "60")),
+        )
+        scroll_wait_ms = max(
+            2000,
+            int(os.getenv("INSTAGRAM_SCROLL_WAIT_MS", "3000")),
+        )
+
+        async def collect_current_links():
             before = len(links)
+
+            try:
+                hrefs = await page.locator(POST_SELECTOR).evaluate_all(
+                    "els => els.map(e => e.href).filter(Boolean)"
+                )
+            except Exception:
+                hrefs = []
+
             for href in hrefs:
                 match = re.search(r"/(?:p|reel|tv)/([^/?#]+)", href)
-                if match and match.group(1) not in seen: seen.add(match.group(1)); links.append((href.split("?")[0], match.group(1)))
-            log.info("[instagram-browser] post links found=%d", len(links))
-            if len(links) >= max_posts: break
-            stagnant = stagnant + 1 if len(links) == before else 0
-            if stagnant >= 2: break
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)"); await page.wait_for_timeout(1500)
+                if not match:
+                    continue
+
+                shortcode = match.group(1)
+                if shortcode in seen:
+                    continue
+
+                seen.add(shortcode)
+                links.append((href.split("?")[0], shortcode))
+
+            # Network listener tarafından bulunan içerikler DOM sanallaştırılsa
+            # bile kaybolmasın.
+            for shortcode, post in list(network_posts.items()):
+                if shortcode in seen:
+                    continue
+
+                seen.add(shortcode)
+                links.append((post["permalink"], shortcode))
+
+            self.discovered_count = len(links)
+            return len(links) - before
+
+        async def click_load_more():
+            labels = (
+                "Load more",
+                "Daha fazla yükle",
+                "See more posts",
+                "Daha fazla gönderi gör",
+                "Show more",
+                "Daha fazlasını göster",
+            )
+
+            for label in labels:
+                try:
+                    button = page.get_by_text(label, exact=True)
+                    if await button.count():
+                        await button.last.click(timeout=3000)
+                        log.info(
+                            "[full-sync] load-more clicked label=%s",
+                            label,
+                        )
+                        return True
+                except Exception:
+                    continue
+
+            return False
+
+        async def force_profile_scroll():
+            anchors = page.locator(POST_SELECTOR)
+
+            try:
+                count = await anchors.count()
+                if count:
+                    await anchors.nth(count - 1).scroll_into_view_if_needed(
+                        timeout=5000
+                    )
+            except Exception:
+                pass
+
+            # Instagram bazı sürümlerde body yerine ayrı bir scroll alanı
+            # kullanıyor. En büyük kaydırılabilir alanı bulup aşağı indir.
+            try:
+                return await page.evaluate("""
+() => {
+    const root =
+        document.scrollingElement ||
+        document.documentElement ||
+        document.body;
+
+    const candidates = [
+        root,
+        ...document.querySelectorAll('main, section, div')
+    ];
+
+    let target = root;
+    let bestRange = Math.max(
+        0,
+        root.scrollHeight - root.clientHeight
+    );
+
+    for (const element of candidates) {
+        if (!element || element === root) continue;
+
+        const style = window.getComputedStyle(element);
+        const overflow = style.overflowY || "";
+        const range = element.scrollHeight - element.clientHeight;
+
+        if (
+            range > bestRange &&
+            range > 300 &&
+            /auto|scroll/.test(overflow)
+        ) {
+            target = element;
+            bestRange = range;
+        }
+    }
+
+    if (target === root) {
+        window.scrollBy(
+            0,
+            Math.max(window.innerHeight * 1.5, 1400)
+        );
+        window.scrollTo(0, root.scrollHeight);
+    } else {
+        target.scrollBy(
+            0,
+            Math.max(target.clientHeight * 1.5, 1400)
+        );
+        target.scrollTop = target.scrollHeight;
+    }
+
+    return {
+        tag: target.tagName || "ROOT",
+        top: target === root ? window.scrollY : target.scrollTop,
+        height: target.scrollHeight,
+        viewport: target === root
+            ? window.innerHeight
+            : target.clientHeight
+    };
+}
+""")
+            except Exception:
+                try:
+                    await page.mouse.wheel(0, 3000)
+                    await page.keyboard.press("End")
+                except Exception:
+                    pass
+                return {}
+
+        while True:
+            scroll_round += 1
+            self.scroll_round = scroll_round
+
+            newly_found = await collect_current_links()
+
+            log.info(
+                "[full-sync] scroll_round=%d discovered=%d added=%d",
+                scroll_round,
+                len(links),
+                newly_found,
+            )
+
+            # Yalnızca normal, sınırlı senkronizasyonda uygulanır.
+            # Full history max_posts=0 gönderdiği için burada durmaz.
+            if max_posts and len(links) >= max_posts:
+                log.info(
+                    "[full-sync] requested max_posts reached=%d",
+                    max_posts,
+                )
+                break
+
+            before_scroll = len(links)
+
+            if stagnant:
+                await click_load_more()
+
+            scroll_state = await force_profile_scroll()
+
+            # Tek bir sabit sleep yerine birkaç kez DOM ve yakalanan network
+            # cevaplarını kontrol et.
+            wait_steps = max(4, scroll_wait_ms // 500)
+
+            for _ in range(wait_steps):
+                await page.wait_for_timeout(500)
+                await collect_current_links()
+
+                if len(links) > before_scroll:
+                    break
+
+            if len(links) > before_scroll:
+                stagnant = 0
+            else:
+                stagnant += 1
+
+                log.info(
+                    "[full-sync] no_new_posts round=%d/%d "
+                    "discovered=%d scroll=%s",
+                    stagnant,
+                    no_new_limit,
+                    len(links),
+                    scroll_state,
+                )
+
+                # IntersectionObserver ve lazy-load mekanizmasını tekrar
+                # tetiklemek için kontrollü hareketler uygula.
+                if stagnant % 4 == 0:
+                    try:
+                        await page.keyboard.press("End")
+                        await page.mouse.wheel(0, 3500)
+                    except Exception:
+                        pass
+
+                if stagnant % 8 == 0:
+                    try:
+                        await page.evaluate("""
+() => {
+    window.scrollBy(0, -900);
+    window.scrollBy(0, 1800);
+}
+""")
+                    except Exception:
+                        pass
+
+            if stagnant >= no_new_limit:
+                log.info(
+                    "[full-sync] no more accessible posts "
+                    "after %d attempts discovered=%d",
+                    stagnant,
+                    len(links),
+                )
+                break
         if not links: raise ScraperError("NO_PUBLIC_POSTS", "Profil açık ancak erişilebilir gönderi bulunamadı", 404)
-        for link, shortcode in links[:max_posts]:
-            if shortcode in known: break
+        selected = links[:max_posts] if max_posts else links
+        for link, shortcode in selected:
+            if shortcode in known:
+                # Daha önce kaydedilmiş gönderiyi atla fakat taramayı
+                # bitirme. Böylece mevcut 10 kayıttan sonra 11-100
+                # arasındaki eski gönderiler de bulunabilir.
+                continue
+            cached = network_posts.get(shortcode)
+            if cached and cached.get("caption") and cached.get("media_url") and cached.get("published_at"):
+                yield cached
+                continue
             detail = await context.new_page()
             try:
                 detail.set_default_timeout(5000)
@@ -213,7 +474,7 @@ class InstagrapiPublicProvider:
         client = Client(); info = await asyncio.to_thread(client.user_info_by_username_gql, username)
         medias = await asyncio.to_thread(client.user_medias_gql, info.pk, max_posts)
         for media in medias:
-            if media.code in known: break
+            if media.code in known: continue
             yield {"external_id":str(media.pk),"shortcode":media.code,"username":username,"caption":media.caption_text or "",
                    "published_at":media.taken_at.isoformat(),"permalink":f"https://www.instagram.com/p/{media.code}/","media_type":str(media.media_type),
                    "thumbnail_url":str(media.thumbnail_url or ""),"media_url":str(media.thumbnail_url or ""),"likes_count":media.like_count or 0,
@@ -226,8 +487,28 @@ class InstaloaderSessionProvider:
         raise ScraperError("PROVIDER_UNAVAILABLE", "Instaloader session provider bu çalıştırmada etkin değil", 503)
 
 
+_BROWSER_PROVIDER = None
+
 def get_provider():
+    global _BROWSER_PROVIDER
+
     name = os.getenv("INSTAGRAM_PROVIDER", "browser_public").lower()
-    providers = {"browser_public":BrowserPublicProvider,"instagrapi_public":InstagrapiPublicProvider,"instaloader_session":InstaloaderSessionProvider}
-    if name not in providers: raise ScraperError("PROVIDER_UNAVAILABLE", f"Bilinmeyen Instagram provider: {name}", 503)
+
+    if name == "browser_public":
+        if _BROWSER_PROVIDER is None:
+            _BROWSER_PROVIDER = BrowserPublicProvider()
+        return _BROWSER_PROVIDER
+
+    providers = {
+        "instagrapi_public": InstagrapiPublicProvider,
+        "instaloader_session": InstaloaderSessionProvider,
+    }
+
+    if name not in providers:
+        raise ScraperError(
+            "PROVIDER_UNAVAILABLE",
+            f"Bilinmeyen Instagram provider: {name}",
+            503,
+        )
+
     return providers[name]()

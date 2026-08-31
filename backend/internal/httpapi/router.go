@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/fethiaksit/social-analytics/internal/documents"
 	"github.com/fethiaksit/social-analytics/internal/domain"
 	"github.com/fethiaksit/social-analytics/internal/instagram"
 	"github.com/fethiaksit/social-analytics/internal/repositories"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-func NewRouter(s *services.Service, instagramService *instagram.Service) *gin.Engine {
+func NewRouter(s *services.Service, instagramService *instagram.Service, documentServices ...*documents.Service) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery(), cors(), errorHandler())
 	r.GET("/health", func(c *gin.Context) {
@@ -31,6 +32,9 @@ func NewRouter(s *services.Service, instagramService *instagram.Service) *gin.En
 	r.GET("/swagger", func(c *gin.Context) { c.Redirect(http.StatusTemporaryRedirect, "/swagger/openapi.yaml") })
 	v := r.Group("/api/v1")
 	instagramRoutes(r.Group("/api/instagram"), instagramService)
+	if len(documentServices) > 0 && documentServices[0] != nil {
+		documents.RegisterRoutes(r.Group("/api/documents"), documentServices[0])
+	}
 	v.GET("/dashboard", func(c *gin.Context) { data, e := s.Dashboard(c.Request.Context()); respond(c, data, e) })
 	v.GET("/accounts", func(c *gin.Context) {
 		p, z := pagination(c)
@@ -172,6 +176,26 @@ func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
 		s.StartSync(c.Param("id"))
 		c.JSON(http.StatusAccepted, gin.H{"status": "syncing"})
 	})
+	r.POST("/accounts/:id/full-sync", func(c *gin.Context) {
+		state, e := s.StartFullSync(c.Param("id"))
+		if errors.Is(e, instagram.ErrConflict) {
+			c.JSON(http.StatusConflict, gin.H{"code": "SYNC_ALREADY_RUNNING", "message": "Bu hesabın geçmiş taraması zaten devam ediyor."})
+			return
+		}
+		if e != nil {
+			c.Error(e)
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"job_id": state.JobID, "status": "queued"})
+	})
+	r.GET("/accounts/:id/sync-status", func(c *gin.Context) {
+		data, e := s.FullSyncStatus(c.Request.Context(), c.Param("id"))
+		respond(c, data, e)
+	})
+	r.POST("/accounts/:id/sync-cancel", func(c *gin.Context) {
+		data, e := s.CancelFullSync(c.Request.Context(), c.Param("id"))
+		respond(c, data, e)
+	})
 	// Backwards-compatible manual sync endpoint used by earlier clients.
 	r.POST("/sync", func(c *gin.Context) {
 		var input struct {
@@ -202,23 +226,34 @@ func instagramRoutes(r *gin.RouterGroup, s *instagram.Service) {
 			c.Error(e)
 			return
 		}
-		search := c.Query("keywords")
+		search := c.Query("keyword")
+		if search == "" {
+			search = c.Query("keywords")
+		}
 		if search == "" {
 			search = c.Query("search")
 		}
-		data, e := s.List(c.Request.Context(), instagram.ListOptions{Page: page, Limit: limit, Username: c.Query("username"), Search: search, MediaType: c.Query("media_type"), Match: c.DefaultQuery("match", "any"), StartDate: start, EndDate: end, Sort: c.DefaultQuery("sort", "newest")})
+		username := c.Query("account_id")
+		if username == "" {
+			username = c.Query("username")
+		}
+		data, e := s.List(c.Request.Context(), instagram.ListOptions{Page: page, Limit: limit, Username: username, Search: search, MediaType: c.Query("media_type"), Match: c.DefaultQuery("match", "any"), StartDate: start, EndDate: end, Sort: c.DefaultQuery("sort", "newest")})
 		respond(c, data, e)
 	})
 	r.GET("/posts/:id", func(c *gin.Context) { data, e := s.Get(c.Request.Context(), c.Param("id")); respond(c, data, e) })
 }
 func instagramPagination(c *gin.Context) (int, int) {
 	p, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	l, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	size := c.Query("page_size")
+	if size == "" {
+		size = c.DefaultQuery("limit", "50")
+	}
+	l, _ := strconv.Atoi(size)
 	if p < 1 {
 		p = 1
 	}
 	if l < 1 {
-		l = 20
+		l = 50
 	}
 	if l > 100 {
 		l = 100

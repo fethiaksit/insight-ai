@@ -40,6 +40,13 @@ if ! "$REDIS_CLI" ping 2>/dev/null | grep -q PONG; then
 fi
 
 PYTHON_BIN="$(command -v python3.12 || true)"; [[ -n "$PYTHON_BIN" ]] || { echo "HATA: Python 3.12 bulunamadı."; exit 1; }
+TESSERACT_BIN="$(command -v tesseract || true)"
+TESSDATA_DIR="$(brew --prefix)/share/tessdata"
+if [[ -n "$TESSERACT_BIN" && -f "$TESSDATA_DIR/tur.traineddata" ]]; then
+  export TESSDATA_PREFIX="$TESSDATA_DIR"
+else
+  echo "UYARI: Taranmış PDF OCR desteği için 'brew install tesseract-lang' çalıştırın."
+fi
 VENV="$HOME/.venvs/sosyalmedyatakip-scraper"
 [[ -x "$VENV/bin/python" ]] || "$PYTHON_BIN" -m venv "$VENV"
 "$VENV/bin/pip" install --disable-pip-version-check -q -r "$PROJECT_ROOT/scraper/requirements.txt"

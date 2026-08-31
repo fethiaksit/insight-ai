@@ -66,4 +66,4 @@ Gönderi alanları `external_id`, `shortcode`, `caption`, `permalink`, `media_ty
 
 Yeni hesap eklenince erişilebilen geçmiş gönderiler alınır. Sonraki manuel ve zamanlanmış senkronizasyonlarda bilinen shortcode'lar scraper'a iletilir; art arda üç bilinen gönderide akış durur. Aynı `external_id` veya permalink yeniden kaydedilmez. Hesaplar ve gönderiler Redis'te süresiz tutulur; Docker Redis servisi AOF `everysec` ile çalışır. OpenAI anahtarı Instagram anahtar kelime araması için gerekli değildir.
 
-Canlı kontrol için scraper çalışırken `curl -N -X POST http://127.0.0.1:8091/v1/profiles/scrape -H 'Content-Type: application/json' -d '{"profile":"omereski","known_shortcodes":[],"max_posts":5}'` kullanılabilir. Instagram erişimi engellerse servis boş başarı yerine hata kodu içeren bir NDJSON satırı döndürür.
+Tam geçmiş kontrolü için scraper çalışırken `curl -N -X POST http://127.0.0.1:8091/v1/profiles/scrape -H 'Content-Type: application/json' -d '{"profile":"omereski","known_shortcodes":[],"full_history":true,"max_posts":0,"batch_size":50}'` kullanılabilir. `max_posts: 0` sınırsızdır.

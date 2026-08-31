@@ -40,16 +40,13 @@ func (p *InstaloaderHTTPProvider) Browser(ctx context.Context, method, path stri
 	return out, nil
 }
 
-func (p *InstaloaderHTTPProvider) ScrapeProfile(ctx context.Context, username string, known []string) (<-chan InstagramScrapeEvent, <-chan error) {
+func (p *InstaloaderHTTPProvider) ScrapeProfile(ctx context.Context, username string, known []string, fullHistory bool) (<-chan InstagramScrapeEvent, <-chan error) {
 	events, errs := make(chan InstagramScrapeEvent), make(chan error, 1)
 	go func() {
 		defer close(events)
 		defer close(errs)
-		maxPosts := 20
-		if len(known) > 0 {
-			maxPosts = 10
-		}
-		body, _ := json.Marshal(map[string]any{"profile": username, "known_shortcodes": known, "max_posts": maxPosts})
+		maxPosts := 2500
+		body, _ := json.Marshal(map[string]any{"profile": username, "known_shortcodes": known, "full_history": fullHistory, "max_posts": maxPosts, "batch_size": 50})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/profiles/scrape", bytes.NewReader(body))
 		if err != nil {
 			errs <- err
@@ -57,7 +54,11 @@ func (p *InstaloaderHTTPProvider) ScrapeProfile(ctx context.Context, username st
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/x-ndjson")
-		res, err := p.client.Do(req)
+		client := p.client
+		if fullHistory {
+			client = &http.Client{}
+		}
+		res, err := client.Do(req)
 		if err != nil {
 			errs <- fmt.Errorf("Instagram scraper bağlantı hatası: %w", err)
 			return
@@ -79,10 +80,19 @@ func (p *InstaloaderHTTPProvider) ScrapeProfile(ctx context.Context, username st
 					IsPrivate     bool   `json:"is_private"`
 					PostsCount    int64  `json:"posts_count"`
 				} `json:"profile"`
-				Post    *Post                           `json:"post"`
-				Fetched int                             `json:"fetched"`
-				Stopped bool                            `json:"stopped_on_known_post"`
-				Error   *struct{ Code, Message string } `json:"error"`
+				Post        *Post                           `json:"post"`
+				Fetched     int                             `json:"fetched"`
+				Stopped     bool                            `json:"stopped_on_known_post"`
+				Provider    string                          `json:"provider"`
+				Discovered  int                             `json:"discovered"`
+				Processed   int                             `json:"processed"`
+				Saved       int                             `json:"saved"`
+				Updated     int                             `json:"updated"`
+				Skipped     int                             `json:"skipped"`
+				Failed      int                             `json:"failed"`
+				ScrollRound int                             `json:"scroll_round"`
+				Status      string                          `json:"status"`
+				Error       *struct{ Code, Message string } `json:"error"`
 			}
 			if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
 				log.Printf("scraper NDJSON satırı atlandı: %v", err)
@@ -98,6 +108,9 @@ func (p *InstaloaderHTTPProvider) ScrapeProfile(ctx context.Context, username st
 			}
 			if raw.Type == "complete" {
 				ev.Complete = &ScrapeComplete{Fetched: raw.Fetched, StoppedOnKnownPost: raw.Stopped}
+			}
+			if raw.Type == "progress" {
+				ev.Progress = &ScrapeProgress{Discovered: raw.Discovered, Processed: raw.Processed, Saved: raw.Saved, Updated: raw.Updated, Skipped: raw.Skipped, Failed: raw.Failed, ScrollRound: raw.ScrollRound, Status: raw.Status}
 			}
 			select {
 			case events <- ev:

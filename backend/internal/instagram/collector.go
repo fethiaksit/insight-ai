@@ -15,7 +15,7 @@ func NewCollector(provider InstagramProvider, repo *Repository) *Collector {
 	return &Collector{provider: provider, repo: repo}
 }
 
-func (c *Collector) Sync(ctx context.Context, username string) (int, error) {
+func (c *Collector) Sync(ctx context.Context, username string, fullHistory bool, onEvent func(InstagramScrapeEvent)) (int, error) {
 	if c.provider == nil {
 		return 0, ErrNotConfigured
 	}
@@ -27,7 +27,7 @@ func (c *Collector) Sync(ctx context.Context, username string) (int, error) {
 	if e != nil {
 		return 0, e
 	}
-	events, errs := c.provider.ScrapeProfile(ctx, username, known)
+	events, errs := c.provider.ScrapeProfile(ctx, username, known, fullHistory)
 	total := 0
 	for events != nil || errs != nil {
 		select {
@@ -35,6 +35,9 @@ func (c *Collector) Sync(ctx context.Context, username string) (int, error) {
 			if !ok {
 				events = nil
 				continue
+			}
+			if onEvent != nil {
+				onEvent(ev)
 			}
 			if ev.Profile != nil {
 				a, accountErr := c.repo.Account(ctx, username)

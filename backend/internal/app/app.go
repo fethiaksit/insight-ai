@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fethiaksit/social-analytics/internal/config"
+	"github.com/fethiaksit/social-analytics/internal/documents"
 	"github.com/fethiaksit/social-analytics/internal/httpapi"
 	"github.com/fethiaksit/social-analytics/internal/instagram"
 	"github.com/fethiaksit/social-analytics/internal/repositories"
@@ -55,12 +56,13 @@ func New() (*Application, error) {
 	svc := services.New(repo, ai)
 	var instagramProvider instagram.InstagramProvider = instagram.NewInstaloaderHTTPProvider(cfg.InstagramScraperURL, cfg.InstagramScraperTimeout)
 	instagramService := instagram.NewService(instagramProvider, cfg.InstagramProvider, instagram.NewRepository(client))
-	router := httpapi.NewRouter(svc, instagramService)
+	documentService := documents.NewService(client, cfg.InstagramScraperURL, "data/documents", cfg.InstagramScraperTimeout)
+	router := httpapi.NewRouter(svc, instagramService, documentService)
 	for _, route := range router.Routes() {
 		if strings.HasPrefix(route.Path, "/api/instagram/") {
 			log.Printf("route registered: %s %s", route.Method, route.Path)
 		}
 	}
-	server := &http.Server{Addr: ":" + cfg.Port, Handler: router, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 11 * time.Minute, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: ":" + cfg.Port, Handler: router, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 11 * time.Minute, WriteTimeout: 11 * time.Minute, IdleTimeout: 60 * time.Second}
 	return &Application{Router: router, Server: server, Scheduler: scheduler.New(svc, cfg.ScanCron, instagramService, cfg.InstagramSyncCron)}, nil
 }
