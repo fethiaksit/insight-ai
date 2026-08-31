@@ -28,7 +28,6 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 export function Documents() {
   const queryClient = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
-  const [fileInputKey, setFileInputKey] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [match, setMatch] = useState<'any' | 'all'>('any');
@@ -51,7 +50,7 @@ export function Documents() {
     },
     onSuccess: () => {
       setFiles([]);
-      setFileInputKey(value => value + 1);
+      setSelectionError('');
       queryClient.invalidateQueries({queryKey: ['documents']});
       queryClient.invalidateQueries({queryKey: ['document-search']});
     },
@@ -65,24 +64,23 @@ export function Documents() {
   });
 
   const selectFiles = (selected: FileList | null) => {
-    const next = Array.from(selected || []);
+    const selectedFiles = Array.from(selected || []);
+    const next = [...files, ...selectedFiles];
     if (next.length > MAX_FILES) {
-      setFiles([]);
       setSelectionError('Bir seferde en fazla 50 PDF seçebilirsiniz.');
       return;
     }
-    const invalid = next.find(file => !file.name.toLocaleLowerCase('tr-TR').endsWith('.pdf'));
+    const invalid = selectedFiles.find(file => !file.name.toLocaleLowerCase('tr-TR').endsWith('.pdf'));
     if (invalid) {
-      setFiles([]);
       setSelectionError(`${invalid.name} geçerli bir PDF değil.`);
       return;
     }
-    const tooLarge = next.find(file => file.size > MAX_FILE_SIZE);
+    const tooLarge = selectedFiles.find(file => file.size > MAX_FILE_SIZE);
     if (tooLarge) {
-      setFiles([]);
       setSelectionError(`${tooLarge.name} 25 MB sınırını aşıyor.`);
       return;
     }
+    upload.reset();
     setSelectionError('');
     setFiles(next);
   };
@@ -99,7 +97,7 @@ export function Documents() {
       <label className="file-picker">
         <Upload size={22}/>
         <span><b>PDF dosyalarını seçin</b><small>En fazla 50 dosya · dosya başına en fazla 25 MB</small></span>
-        <input key={fileInputKey} type="file" accept="application/pdf,.pdf" multiple onChange={event => selectFiles(event.target.files)}/>
+        <input type="file" accept="application/pdf,.pdf" multiple disabled={upload.isPending} onChange={event => {selectFiles(event.currentTarget.files); event.currentTarget.value = ''}}/>
       </label>
       <button className="primary" disabled={!files.length || upload.isPending}>
         <Upload size={16}/> {upload.isPending ? 'İşleniyor…' : files.length ? `${files.length} PDF yükle` : 'PDF yükle'}
@@ -143,7 +141,18 @@ function documentFileURL(id: string) {
 }
 
 function backendMessage(error: unknown, fallback: string) {
-  return (error as {response?: {data?: {error?: {message?: string}}}})?.response?.data?.error?.message || fallback;
+  const typedError = error as {message?: string; response?: {data?: unknown}};
+  const data = typedError.response?.data;
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data && typeof data === 'object') {
+    const body = data as {message?: string; detail?: string | {message?: string}; error?: string | {message?: string}};
+    if (typeof body.error === 'string') return body.error;
+    if (body.error?.message) return body.error.message;
+    if (typeof body.detail === 'string') return body.detail;
+    if (body.detail?.message) return body.detail.message;
+    if (body.message) return body.message;
+  }
+  return typedError.message || fallback;
 }
 
 function highlight(text: string, keywords: string[]) {
