@@ -71,6 +71,9 @@ type Service struct {
 }
 
 func NewService(client *redis.Client, extractorBaseURL, storageDir string, _ time.Duration) *Service {
+	if absoluteStorageDir, err := filepath.Abs(storageDir); err == nil {
+		storageDir = absoluteStorageDir
+	}
 	return &Service{
 		redis:        client,
 		extractorURL: strings.TrimRight(extractorBaseURL, "/") + "/v1/pdf/extract",

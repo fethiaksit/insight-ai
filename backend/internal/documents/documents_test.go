@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,13 @@ func TestPDFExtractorClientHasNoTimeout(t *testing.T) {
 	service := NewService(nil, "http://127.0.0.1:8091", "data/documents", time.Minute)
 	if service.httpClient.Timeout != 0 {
 		t.Fatalf("PDF extractor client timeout = %s, want 0", service.httpClient.Timeout)
+	}
+}
+
+func TestDocumentStoragePathIsAbsolute(t *testing.T) {
+	service := NewService(nil, "http://127.0.0.1:8091", "data/documents", time.Minute)
+	if !filepath.IsAbs(service.storageDir) {
+		t.Fatalf("document storage path = %q, want an absolute path", service.storageDir)
 	}
 }
 
